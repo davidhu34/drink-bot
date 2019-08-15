@@ -1,0 +1,14 @@
+{
+  "name": "drink-bot-server",
+  "main": "index.js",
+  "scripts": {
+    "dev": "nodemon index",
+    "start": "node index"
+  },
+  "dependencies": {
+    "@line/bot-sdk": "^6.8.2",
+    "koa": "^2.7.0",
+    "koa-bodyparser": "^4.2.1",
+    "koa-router": "^7.4.0"
+  }
+}
