@@ -7,6 +7,7 @@ const config = {
 };
 
 const lineMiddleware = async function (ctx, next) {
+    console.log(ctx.req.body);
     await line.middleware(config)(ctx.req, ctx.res, next);
 }
 

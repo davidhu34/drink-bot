@@ -1,0 +1,36 @@
+{
+    "richMenuId": "CUSTOM_RICH_MENU",
+    "size":{
+        "width":800,
+        "height":270
+    },
+    "selected":false,
+    "name":"Controller",
+    "chatBarText":"訂飲料",
+    "areas":[
+        {
+            "bounds":{
+                "x":0,
+                "y":0,
+                "width":300,
+                "height":270
+            },
+            "action":{
+                "type":"message",
+                "text":"自己揪團選飲料店"
+            }
+        },
+        {
+            "bounds":{
+                "x":500,
+                "y":0,
+                "width":300,
+                "height":270
+            },
+            "action":{
+                "type":"message",
+                "text":"跟別人的單一起訂"
+            }
+        }
+    ]
+}
