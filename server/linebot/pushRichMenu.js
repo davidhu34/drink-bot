@@ -76,7 +76,7 @@ const deleteExtraRichMenu = async function (richMenuId) {
     const listResponse = await getRichMenuList();
 
     const { richmenus } = listResponse.data;
-    let extraRichMenuIdList = [];
+    const extraRichMenuIdList = [];
     for (let menu of richmenus) {
         if (menu.richMenuId !== richMenuId) {
             extraRichMenuIdList.push(menu.richMenuId);
@@ -99,4 +99,4 @@ const updateRichMenu = async function () {
     return richMenuId;
 }
 
-updateRichMenu().then( menuId => console.log(menuId) );
+updateRichMenu().then( menuId => console.log('Updated Rich Menu', menuId) );

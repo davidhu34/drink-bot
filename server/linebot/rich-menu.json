@@ -16,8 +16,9 @@
                 "height":270
             },
             "action":{
-                "type":"message",
-                "text":"自己揪團選飲料店"
+                "type":"postback",
+                "label":"自己揪團選飲料店",
+                "data":"action=RICH_MENU&index=0"
             }
         },
         {
@@ -28,8 +29,9 @@
                 "height":270
             },
             "action":{
-                "type":"message",
-                "text":"跟別人的單一起訂"
+                "type":"postback",
+                "label": "跟別人的單一起訂",
+                "data": "action=RICH_MENU&index=1"
             }
         }
     ]
