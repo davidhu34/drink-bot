@@ -43,13 +43,17 @@ async function updateUser(userId) {
     }
 }
 
+async function getUserProfile(userId) {
+    return users[userId] || await updateUserProfile(userId);
+}
+
 async function handleMessageEvent(event) {
 
     const { source, message, replyToken } = event;
     console.log('message event:');
     console.log(source, message);
     
-    await updateUser(source.userId);
+    await getUserProfile(source.userId);
     console.log('users',users);
     const viewCarts = cartCarousel(event, CARTS.filter(a => a.userId === 'U7f3c8865af6bc3c0c4161bbb13b90d0c'));
     const replyData = viewCarts;
@@ -57,8 +61,7 @@ async function handleMessageEvent(event) {
 }
 
 
-const getRichMenuReply = async (postback) => {
-    const { data, param, source } = postback
+const getRichMenuReply = async ({ data, param, source }) => {
     const { index } = data;
     const cartFilter
         = index == 0? a => a.userId === source.userId
@@ -69,11 +72,18 @@ const getRichMenuReply = async (postback) => {
     return viewCarts;
 };
 
+const getShopMenuReply = async ({ data, param, source }) => {
+    const shop = await getShop(data.shopId);
+    return shop.menuUrls.map( url => imageAction(url));
+};
+
 function getPostbackReply(postback) {
     const { action } = postback.data;
     switch (action) {
         case 'RICH_MENU':
             return getRichMenuReply(postback);
+        case 'SEE_MENU':
+            return getShopMenuReply(postback);
         default:
             return echoText(action);
     }
@@ -88,7 +98,7 @@ async function handlePostbackEvent(event) {
     console.log('postback event:');
     console.log(source,postback);
     
-    await updateUser(source.userId);
+    await getUserProfile(source.userId);
     console.log('users',users);
 
     const replyData = await getPostbackReply({ data, param, source });
@@ -98,32 +108,34 @@ async function handlePostbackEvent(event) {
 
 const getShop = (shopId) => ds.getShopById(shopId);
 
-const getSeeMenuPostback = async (shopId) => {
-    const shop = await getShop(shopId);
-    console.log(shop);
-    return shop
-        ? postbackAction('看菜單', qs.stringify({
+const getSeeMenuPostback = (shop) => {
+    const data = qs.stringify({
             action: 'SEE_MENU',
-            shopId
-        }), {
+        shopId: shop.shopId
+    });
+    const config = {
             displayText: `看${shop.name}(${shop.branch})菜單`
-        })
-        : null;
+    };
+
+    return postbackAction('看菜單', data, config);
 };
 
-const getOrderDrinkPostback = () => {}
+const getOrderDrinkPostback = () => {};
 
 const cartCarouselCol = async (source,cart) => {
     const ownerId = cart.userId
     const mine = source.userId === ownerId;
     console.log('cart owner', ownerId);
-    const ownerName = users[ownerId].displayName;
-    
+    const [owner, shop] = await Promise.all([
+        getUserProfile(ownerId),
+        getShop(cart.shopId)
+    ]);
     const actions = [];
     
     // 看菜單
-    const seeMenu = await getSeeMenuPostback(cart.shopId);
-    if (seeMenu) actions.push(seeMenu);
+    if (shop.menuUrls.length) {
+        actions.push(getSeeMenuPostback(shop));
+    }
     
     // 跟單
     actions.push(messageAction(mine? '幫自己訂一杯': '跟著一起訂'));
@@ -136,7 +148,8 @@ const cartCarouselCol = async (source,cart) => {
     const desc = `預計 ${cart.expiration} 結單`;
 
     return carouselCol(desc, actions, {
-        title:`${cart.shopId}(${ownerName})`
+        title:`${shop.shopId}(${owner.displayName})`,
+        thumbnailImageUrl: shop.logoUrl
     });
 }
 
@@ -195,4 +208,10 @@ const messageAction = (label,text = '') => ({
     type: 'message',
     label,
     text: text || label,
+});
+
+const imageAction = (url) => ({
+    type: 'image',
+    originalContentUrl: url,
+    previewImageUrl: url
 });

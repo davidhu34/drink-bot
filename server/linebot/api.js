@@ -28,7 +28,7 @@ const basicErrorMessage = (name,error) => {
  */
 const getUserProfilePath = (userId) => `${LINE_BOT_ROOT_PATH}${LINE_USER_PROFILE_PATH}/${userId}`;
 
- const getUserProfile = (userId) => axios({
+const fetchUserProfile = (userId) => axios({
     method: 'get',
     url: getUserProfilePath(userId),
     headers: {
@@ -37,7 +37,7 @@ const getUserProfilePath = (userId) => `${LINE_BOT_ROOT_PATH}${LINE_USER_PROFILE
 }).catch( error => basicErrorMessage('Profile Get',error) );
 
 const updateUserProfile = async (userId) => {
-    let profileResponse = await getUserProfile(userId);
+    let profileResponse = await fetchUserProfile(userId);
     const profile = profileResponse.data;
     console.log(profile);
     if (profile.userId) {
@@ -84,7 +84,7 @@ const updateDefaultRichMenu = (richMenuId) => axios({
     }
 }).catch( error => basicErrorMessage('Rich Menu Update Default',error) );
 
-const getRichMenuList = () => axios({
+const fetchRichMenuList = () => axios({
     method: 'get',
     url: richMenuListPath,
     headers: {
@@ -102,7 +102,7 @@ const deleteRichMenu = (richMenuId) => axios({
 
 const deleteExtraRichMenu = async (richMenuId) => {
 
-    const listResponse = await getRichMenuList();
+    const listResponse = await fetchRichMenuList();
 
     const { richmenus } = listResponse.data;
     const extraRichMenuIdList = [];
