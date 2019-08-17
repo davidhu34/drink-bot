@@ -1,6 +1,9 @@
 configs.js
 *testData.js
 
+# gcloud datastore
+keyfile.json
+
 # koa
 test.js
 .idea

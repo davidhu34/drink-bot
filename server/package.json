@@ -6,6 +6,7 @@
     "start": "node index"
   },
   "dependencies": {
+    "@google-cloud/datastore": "^4.2.0",
     "@line/bot-sdk": "^6.8.2",
     "koa": "^2.7.0",
     "koa-bodyparser": "^4.2.1",
