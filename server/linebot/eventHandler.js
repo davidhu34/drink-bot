@@ -1,12 +1,10 @@
 const qs = require('querystring');
+const moment = require('moment');
+
 const ds = require('../datastore');
 const {
     updateUserProfile
 } = require('./api');
-
-const {
-    CARTS
-} = require('./testData.js');
 
 function handleEvent(event) {
     switch (event.type) {
@@ -51,9 +49,7 @@ async function getUserProfile(userId) {
         users[userId] = await updateUserProfile(userId);
         return users[userId];
     }
-}
-
-
+};
 
 const sizeDescList = ['大','中','小'];
 const iceDescList = ['正常', '少冰', '半冰', '微冰', '去冰'];
@@ -130,7 +126,7 @@ async function handleMessageEvent(event) {
 
 let carts = [];
 
-const getRichMenuReply = async ({ data, param, source }) => {
+const getRichMenuReply = async ({ data, params, source }) => {
     const { index } = data;
     const cartList = await ds.getCarts();
     carts = cartList || [];
@@ -140,11 +136,27 @@ const getRichMenuReply = async ({ data, param, source }) => {
         : index == 1? a => a.userId !== source.userId
         : a => a;
 
-    const viewCarts = cartCarousel(source, carts.filter(cartFilter));
-    return viewCarts;
+    const viewCarts = carts.filter(cartFilter);
+    if (viewCarts.length) {
+        return cartCarousel(source, carts.filter(cartFilter));
+    } else {
+        return shopCarousel();
+    }
 };
 
-const getShopMenuQuickReply = async ({ data, param, source }) => {
+const getNewCartReply = async ({ data, params, source }) => {
+    const shopId = data.shopId;
+    const userId = source.userId;
+    console.log('time',params.datetime);
+    const cartEntity = await ds.saveCart({
+        shopId,
+        userId,
+        expiration: new Date(params.datetime)
+    });
+    return cartCarousel(source, [ds.entityToData(cartEntity)]);
+};
+
+const getShopMenuQuickReply = async ({ data, params, source }) => {
     const { cartId } = data;
 
     if (cartId) {
@@ -181,7 +193,7 @@ const newDrink = () => ({
     size: ''
 });
 
-const getOrderDrinkReply = ({ data, param, source }) => {
+const getOrderDrinkReply = ({ data, params, source }) => {
     const { cartId } = data;
     const cart = ds.getCartById(cartId);
     if (cart) {
@@ -194,7 +206,7 @@ const getOrderDrinkReply = ({ data, param, source }) => {
     } else return textMessage('訂單已經過期');
 }
 
-const getSubmitOrderReply = async ({ data, param, source }) => {
+const getSubmitOrderReply = async ({ data, params, source }) => {
     const affirmative = data.flag == 1;
     const userId = source.userId;
     if (affirmative) {
@@ -212,7 +224,7 @@ const getSubmitOrderReply = async ({ data, param, source }) => {
     return affirmative? textMessage('訂好了'): textMessage('取消了');
 };
 
-const getConfirmRevokeReply = ({ data, param, source }) => {
+const getConfirmRevokeReply = ({ data, params, source }) => {
     return getConfirmationMessage(
         `確定取消飲料?`,
         'SUBMIT_REVOKE_ORDER',
@@ -220,7 +232,7 @@ const getConfirmRevokeReply = ({ data, param, source }) => {
     );
 };
 
-const getSubmitRevokeReply = async ({ data, param, source }) => {
+const getSubmitRevokeReply = async ({ data, params, source }) => {
     const orderId = data.orderId;
     await ds.deleteOrder(orderId);
     return textMessage('取消飲料了');
@@ -231,6 +243,8 @@ function getPostbackReply(postback) {
     switch (action) {
         case 'RICH_MENU':
             return getRichMenuReply(postback);
+        case 'NEW_CART':
+            return getNewCartReply(postback);
         case 'SHOP_MENU':
             return getShopMenuReply(postback);
         case 'ORDER_DRINK':
@@ -251,14 +265,14 @@ async function handlePostbackEvent(event) {
     const { source, postback, replyToken } = event;
     
     const data = qs.parse(postback.data);
-    const param = postback.param;
+    const params = postback.params;
     console.log('postback event:');
     console.log(source,postback);
     
     await getUserProfile(source.userId);
     console.log('users',users);
 
-    const replyData = await getPostbackReply({ data, param, source });
+    const replyData = await getPostbackReply({ data, params, source });
     return { replyToken, replyData };
 }
 
@@ -307,18 +321,6 @@ const getOrderDrinkPostback = (cartData, mine) => {
     })
 };
 
-
-const submitConfirmationPostback = (action) => (affirmative) => {
-    const label = affirmative? '確定': '取消';
-    const data = qs.stringify({
-        action,
-        flag: affirmative? 1: 2
-    });
-    return postbackAction(label, data, {
-        displayText: label,
-    });
-};
-
 const getConfirmationMessage = (msg, action, postbackData = {}) => confirmMessage(
     msg,
     [true, false].map(affirmative => {
@@ -334,6 +336,17 @@ const getConfirmationMessage = (msg, action, postbackData = {}) => confirmMessag
     })
 );
 
+const getOrderOrRevokeAction = async (cartData, userId) => {
+    const userOrdersInCart = await ds.getUserOrderInCart(userId, cartData.cartId);
+    
+    if (userOrdersInCart.length) {
+        const userOrder = userOrdersInCart[0];
+        return getRevokeOrderPostback(cartData,userOrder);
+    } else {
+        const mine = cartData.userId === userId;
+        return getOrderDrinkPostback(cartData,mine);
+    }
+};
 
 const getCartDataById = async (cartId) => {
     const cart = await ds.getCartById(cartId);
@@ -354,18 +367,6 @@ const getCartData = async (cart) => {
         owner,
         shop
     };
-};
-
-const getOrderOrRevokeAction = async (cartData, userId) => {
-    const userOrdersInCart = await ds.getUserOrderInCart(userId, cartData.cartId);
-    
-    if (userOrdersInCart.length) {
-        const userOrder = userOrdersInCart[0];
-        return getRevokeOrderPostback(cartData,userOrder);
-    } else {
-        const mine = owner.userId === userId;
-        return getOrderDrinkPostback(cartData,mine);
-    }
 };
 
 const cartCarouselCol = async (source,cart) => {
@@ -407,6 +408,26 @@ const cartCarousel = async (source,carts) => {
     return carousel(columns, '目前訂單');
 }
 
+const getShopPostback = (shop) => {
+    const shopId = shop.shopId;
+    const label = `訂${shop.nameZH}`;
+    const data = qs.stringify({
+        action: 'NEW_CART',
+        shopId
+    });
+    return datetimePickerAction(label, data, {
+    });
+}
+
+const shopCarousel = async () => {
+    const shops = await ds.getShops();
+    console.log(shops);
+    return imageCarousel(
+        shops.map( shop => imageCarouselCol(shop.logoUrl, getShopPostback(shop)) ),
+        '訂哪家',
+    );
+};
+
 const textMessage = (text) => ({
     type: 'text', text
 });
@@ -447,6 +468,14 @@ const imageCarousel = (columns,altText) => ({
 
 const postbackAction = (label, data, config = {}) => ({
     type: 'postback',
+    label,
+    data,
+    ...config
+});
+
+const datetimePickerAction = (label, data, config = {}) => ({
+    type: 'datetimepicker',
+    mode: 'datetime',
     label,
     data,
     ...config

@@ -46,8 +46,16 @@ const getKindById = (kind, id) => searchKey(dsKey(kind,id));
 module.exports = {
     datastore: datastore,
     KEY: datastore.KEY,
+    entityToData: (entity) => ({
+        ...entity.data,
+        [datastore.KEY]: entity.key
+    }),
     getKey: (entity) => entity[datastore.KEY].id.toString(),
     getCarts: () => runQuery(dsQuery('Cart')),
+    saveCart: (cart) => dsSave({
+        key: dsKindKey('Cart'),
+        data: cart
+    }),
     getCartById: (id) => getKindById('Cart', id),
     getShops: () => runQuery(dsQuery('Shop')),
     getShopById: (id) => getKindById('Shop', id),

@@ -9,7 +9,7 @@ const app = new Koa();
 // const { applyMiddlewares } = require('./middleware');
 // applyMiddlewares(app);
 
-// const router = require('./router')(app);
+const router = require('./router')(app);
 
 const lineBot = require('./linebot')(app);
 
