@@ -19,7 +19,7 @@ const dsSave = (entity) => dsPromise( (resolve, reject) => {
     });
 });
 
-const runQuery = () => dsPromise( (resolve, reject) => {
+const runQuery = (query) => dsPromise( (resolve, reject) => {
     datastore.runQuery(query, (err, entities) => {
         if (err) reject(err);
         else resolve(entities);
@@ -33,10 +33,16 @@ const searchKey = (key) => dsPromise( (resolve, reject) => {
     });
 });
 
+const getKindById = (kind, id) => searchKey(dsKey(kind,id));
+
 module.exports = {
     datastore: datastore,
+    KEY: datastore.KEY,
+    getKey: (entity) => entity[datastore.KEY].id.toString(),
+    getCarts: () => runQuery(dsQuery('Cart')),
+    getCartById: (id) => getKindById('Cart', id),
     getShops: () => runQuery(dsQuery('Shop')),
-    getShopById: (id) => searchKey(dsKey('Shop',id)),
+    getShopById: (id) => getKindById('Shop', id),
     saveUserProfile: profile => dsSave({
         key: dsKey('User',profile.userId),
         excludeFromIndexes: [

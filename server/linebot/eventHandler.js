@@ -44,7 +44,64 @@ async function updateUser(userId) {
 }
 
 async function getUserProfile(userId) {
-    return users[userId] || await updateUserProfile(userId);
+    const profile = users[userId];
+    if (profile) {
+        return profile;
+    } else {
+        users[userId] = await updateUserProfile(userId);
+        return users[userId];
+    }
+}
+
+
+
+const sizeDescList = ['大','中','小'];
+const iceDescList = ['正常', '少冰', '半冰', '微冰', '去冰'];
+const sugarDescList = ['正常', '少糖', '半糖', '微糖', '無糖'];
+
+const orderInfoReply = (msg, descList) => ({
+    ...textMessage(msg),
+    quickReply: quickReply(
+        descList.map(desc => messageAction(desc))
+    )
+});
+
+const confirmOrderReply = ({ userId }) => {
+    const { item } = users[userId].currentOrder;
+    const { name, size, ice, sugar } = item;
+    users[userId].currentOrder = null;
+    return textMessage(`確認: ${name} ${size} ${ice} ${sugar}`);
+};
+const fillOrder = (filling, { source, message }) => {
+    const { time, item } = users[source.userId].currentOrder;
+    const order = {
+        time,
+        item: {
+            ...item,
+            [filling]: message.text
+        }
+    };
+    users[source.userId].currentOrder = order;
+    return order
+};
+
+async function handleOrder (orderItem,event) {
+    let reply = null;
+    if (!orderItem.name) {
+        fillOrder('name',event);
+        reply = orderInfoReply('什麼大小?', sizeDescList);
+    } else if (!orderItem.size) {
+        fillOrder('size',event);
+        reply = orderInfoReply('冰塊怎麼調整?', iceDescList);
+    } else if (!orderItem.ice) {
+        fillOrder('ice',event);
+        reply = orderInfoReply('甜度怎麼調整?', sugarDescList);
+    } else if (!orderItem.suger) {
+        fillOrder('sugar',event);
+        reply = confirmOrderReply(event.source);
+    }
+
+    return reply;
 }
 
 async function handleMessageEvent(event) {
@@ -55,37 +112,90 @@ async function handleMessageEvent(event) {
     
     await getUserProfile(source.userId);
     console.log('users',users);
-    const viewCarts = cartCarousel(event, CARTS.filter(a => a.userId === 'U7f3c8865af6bc3c0c4161bbb13b90d0c'));
-    const replyData = viewCarts;
-    return { replyToken, replyData };
-}
 
+    const { currentOrder } = users[source.userId];
+    if (currentOrder) {
+        const replyData = await handleOrder(currentOrder.item, event);
+        return { replyToken, replyData };
+    } else return { replyToken, replyData: textMessage(message.text) };
+};
+
+
+let carts = [];
 
 const getRichMenuReply = async ({ data, param, source }) => {
     const { index } = data;
+    const cartList = await ds.getCarts();
+    carts = cartList || [];
+
     const cartFilter
         = index == 0? a => a.userId === source.userId
         : index == 1? a => a.userId !== source.userId
         : a => a;
 
-    const viewCarts = cartCarousel(source, CARTS.filter(cartFilter));
+    const viewCarts = cartCarousel(source, carts.filter(cartFilter));
     return viewCarts;
 };
 
-const getShopMenuReply = async ({ data, param, source }) => {
-    const shop = await getShop(data.shopId);
-    return shop.menuUrls.map( url => imageAction(url));
+const getShopMenuQuickReply = async ({ data, param, source }) => {
+    const { cartId } = data;
+
+    if (cartId) {
+        // from a cart
+        const cartData = await getCartDataById(cartId);
+        return quickReply([
+            getOrderDrinkPostback(cartData,source.userId === cartData.owner.userId)
+        ]);
+    } else {
+        // from shop list
+        return quickReply([
+            messageAction('shop menu quick reply from list')
+        ]);
+    }
+}
+
+const getShopMenuReply = async (postback) => {
+    const shop = await getShop(postback.data.shopId);
+    const quickReply = await getShopMenuQuickReply(postback);
+
+    return shop.menuUrls.map( (url,index) => {
+        const baseAction = imageAction(url);
+        return index === shop.menuUrls.length - 1? {
+            ...baseAction, quickReply
+        }: baseAction;
+    });
 };
+
+const newDrink = () => ({
+    name: '',
+    sugar: '',
+    ice: '',
+    size: ''
+});
+
+const getOrderDrinkReply = ({ data, param, source }) => {
+    const { cartId } = data;
+    const cart = ds.getCartById(cartId);
+    if (cart) {
+        users[source.userId].currentOrder = {
+            time: new Date(),
+            item: newDrink()
+        };
+        return textMessage('請問要喝哪種飲料呢?');
+    } else return textMessage('訂單已經過期');
+}
 
 function getPostbackReply(postback) {
     const { action } = postback.data;
     switch (action) {
         case 'RICH_MENU':
             return getRichMenuReply(postback);
-        case 'SEE_MENU':
+        case 'SHOP_MENU':
             return getShopMenuReply(postback);
+        case 'ORDER_DRINK':
+            return getOrderDrinkReply(postback)
         default:
-            return echoText(action);
+            return textMessage(action);
     }
 };
 
@@ -108,47 +218,79 @@ async function handlePostbackEvent(event) {
 
 const getShop = (shopId) => ds.getShopById(shopId);
 
-const getSeeMenuPostback = (shop) => {
+const getShopMenuPostback = (shop,cartId) => {
     const data = qs.stringify({
-            action: 'SEE_MENU',
-        shopId: shop.shopId
+        action: 'SHOP_MENU',
+        shopId: shop.shopId,
+        cartId: cartId
     });
-    const config = {
-            displayText: `看${shop.name}(${shop.branch})菜單`
-    };
 
-    return postbackAction('看菜單', data, config);
+    return postbackAction('看菜單', data, {
+        displayText: `看${shop.nameZH}(${shop.branch})菜單`
+    });
 };
 
-const getOrderDrinkPostback = () => {};
+const getOrderDrinkPostback = (cartData, mine) => {
+    const { owner, cartId } = cartData;
+    const label = mine
+        ? '幫自己訂一杯'
+        : `跟著${owner.displayName}訂一杯`;
 
-const cartCarouselCol = async (source,cart) => {
-    const ownerId = cart.userId
-    const mine = source.userId === ownerId;
-    console.log('cart owner', ownerId);
+    const data = qs.stringify({
+        action: 'ORDER_DRINK', cartId
+    });
+    return postbackAction(label, data, {
+        displayText: label,
+    })
+};
+
+const getCartDataById = async (cartId) => {
+    const cart = await ds.getCartById(cartId);
+    return getCartData(cart);
+};
+
+const getCartData = async (cart) => {
+    const cartId = ds.getKey(cart);
     const [owner, shop] = await Promise.all([
-        getUserProfile(ownerId),
+        getUserProfile(cart.userId),
         getShop(cart.shopId)
     ]);
+    
+    console.log('cart', cart, owner, shop);
+    return {
+        ...cart,
+        cartId,
+        owner,
+        shop
+    };
+}
+
+const cartCarouselCol = async (source,cart) => {
+    const cartData = await getCartData(cart);
+
+    const { owner, shop, cartId } = cartData;
+    const mine = owner.userId === source.userId;
+
     const actions = [];
     
     // 看菜單
     if (shop.menuUrls.length) {
-        actions.push(getSeeMenuPostback(shop));
+        actions.push(getShopMenuPostback(shop,cartId));
     }
     
     // 跟單
-    actions.push(messageAction(mine? '幫自己訂一杯': '跟著一起訂'));
+    actions.push(getOrderDrinkPostback(cartData,mine));
 
     // 結單
     if (mine) {
         actions.push(messageAction('結單'));
     }
 
-    const desc = `預計 ${cart.expiration} 結單`;
+    const exp = cart.expiration;
+    const desc = `預計 ${exp.getMonth()+1}/${exp.getDate()} ${exp.getHours()}:${exp.getMinutes()} 結單`;
 
     return carouselCol(desc, actions, {
-        title:`${shop.shopId}(${owner.displayName})`,
+        title:`${shop.nameZH}(${owner.displayName})`,
         thumbnailImageUrl: shop.logoUrl
     });
 }
@@ -161,7 +303,7 @@ const cartCarousel = async (source,carts) => {
     return carousel(columns, '目前訂單');
 }
 
-const echoText = (text) => ({
+const textMessage = (text) => ({
     type: 'text', text
 });
 
@@ -196,6 +338,19 @@ const postbackAction = (label, data, config = {}) => ({
     label,
     data,
     ...config
+});
+
+const quickReply = (actions) => ({
+    items: actions.map( action => baseAction(action) )
+});
+
+const baseAction = (action) => ({
+    type: 'action', action
+});
+
+const basePostbackAction = (label, data, config) => ({
+    type: 'action',
+    action: postbackAction(label, data, config)
 });
 
 const uriAction = (label,uri) => ({
