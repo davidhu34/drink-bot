@@ -71,9 +71,9 @@ const getCurrentOrder = (userId) => users[userId].currentOrder || {};
 const confirmOrderReply = ({ userId }) => {
     const { item } = getCurrentOrder(userId);
     const { name, size, ice, sugar } = item;
-    return confirmMessage(
+    return getConfirmationMessage(
         `確認: ${name} ${size} ${ice} ${sugar}`,
-        [true, false].map(affirmative => getConfirmOrderPostback(affirmative))
+        'SUBMIT_ORDER_DRINK'
     );
 };
 
@@ -150,8 +150,9 @@ const getShopMenuQuickReply = async ({ data, param, source }) => {
     if (cartId) {
         // from a cart
         const cartData = await getCartDataById(cartId);
+        const orderAction = await getOrderOrRevokeAction(cartData,source.userId);
         return quickReply([
-            getOrderDrinkPostback(cartData,source.userId === cartData.owner.userId)
+            orderAction
         ]);
     } else {
         // from shop list
@@ -193,7 +194,7 @@ const getOrderDrinkReply = ({ data, param, source }) => {
     } else return textMessage('訂單已經過期');
 }
 
-const getConfirmOrderReply = async ({ data, param, source }) => {
+const getSubmitOrderReply = async ({ data, param, source }) => {
     const affirmative = data.flag == 1;
     const userId = source.userId;
     if (affirmative) {
@@ -209,6 +210,20 @@ const getConfirmOrderReply = async ({ data, param, source }) => {
     }
     users[userId].currentOrder = null;
     return affirmative? textMessage('訂好了'): textMessage('取消了');
+};
+
+const getConfirmRevokeReply = ({ data, param, source }) => {
+    return getConfirmationMessage(
+        `確定取消飲料?`,
+        'SUBMIT_REVOKE_ORDER',
+        { orderId: data.orderId }
+    );
+};
+
+const getSubmitRevokeReply = async ({ data, param, source }) => {
+    const orderId = data.orderId;
+    await ds.deleteOrder(orderId);
+    return textMessage('取消飲料了');
 }
 
 function getPostbackReply(postback) {
@@ -220,8 +235,12 @@ function getPostbackReply(postback) {
             return getShopMenuReply(postback);
         case 'ORDER_DRINK':
             return getOrderDrinkReply(postback);
-        case 'CONFIRM_ORDER_DRINK':
-            return getConfirmOrderReply(postback)
+        case 'SUBMIT_ORDER_DRINK':
+            return getSubmitOrderReply(postback);
+        case 'CONFIRM_REVOKE_ORDER':
+            return getConfirmRevokeReply(postback);
+        case 'SUBMIT_REVOKE_ORDER':
+            return getSubmitRevokeReply(postback);
         default:
             return textMessage(action);
     }
@@ -258,6 +277,22 @@ const getShopMenuPostback = (shop,cartId) => {
     });
 };
 
+const getRevokeOrderPostback = (cartData,order) => {
+    const orderId = ds.getKey(order);
+    const { owner, shop } = cartData;
+    const mine = order.userId === cartData.userId;
+    const label = mine
+        ? `取消自己的${order.name}`
+        : `取消跟${owner.displayName}訂的${order.name}`;
+
+    const data = qs.stringify({
+        action: 'CONFIRM_REVOKE_ORDER', orderId
+    });
+    return postbackAction(label, data, {
+        displayText: label,
+    })
+};
+
 const getOrderDrinkPostback = (cartData, mine) => {
     const { owner, cartId } = cartData;
     const label = mine
@@ -272,16 +307,33 @@ const getOrderDrinkPostback = (cartData, mine) => {
     })
 };
 
-const getConfirmOrderPostback = (affirmative) => {
+
+const submitConfirmationPostback = (action) => (affirmative) => {
     const label = affirmative? '確定': '取消';
     const data = qs.stringify({
-        action: 'CONFIRM_ORDER_DRINK',
+        action,
         flag: affirmative? 1: 2
     });
     return postbackAction(label, data, {
         displayText: label,
     });
 };
+
+const getConfirmationMessage = (msg, action, postbackData = {}) => confirmMessage(
+    msg,
+    [true, false].map(affirmative => {
+        const label = affirmative? '確定': '取消';
+        const data = qs.stringify({
+            action,
+            ...postbackData,
+            flag: affirmative? 1: 2
+        });
+        return postbackAction(label, data, {
+            displayText: label,
+        });
+    })
+);
+
 
 const getCartDataById = async (cartId) => {
     const cart = await ds.getCartById(cartId);
@@ -302,7 +354,19 @@ const getCartData = async (cart) => {
         owner,
         shop
     };
-}
+};
+
+const getOrderOrRevokeAction = async (cartData, userId) => {
+    const userOrdersInCart = await ds.getUserOrderInCart(userId, cartData.cartId);
+    
+    if (userOrdersInCart.length) {
+        const userOrder = userOrdersInCart[0];
+        return getRevokeOrderPostback(cartData,userOrder);
+    } else {
+        const mine = owner.userId === userId;
+        return getOrderDrinkPostback(cartData,mine);
+    }
+};
 
 const cartCarouselCol = async (source,cart) => {
     const cartData = await getCartData(cart);
@@ -317,12 +381,13 @@ const cartCarouselCol = async (source,cart) => {
         actions.push(getShopMenuPostback(shop,cartId));
     }
     
-    // 跟單
-    actions.push(getOrderDrinkPostback(cartData,mine));
+    // 跟單 || 抽單
+    const orderAction = await getOrderOrRevokeAction(cartData, source.userId);
+    actions.push(orderAction)
 
     // 結單
     if (mine) {
-        actions.push(messageAction('結單'));
+        actions.push(messageAction('統計'));
     }
 
     const exp = cart.expiration;

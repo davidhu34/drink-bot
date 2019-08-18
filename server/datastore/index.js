@@ -20,6 +20,13 @@ const dsSave = (entity) => dsPromise( (resolve, reject) => {
     });
 });
 
+const dsDelete = (kind, id) => dsPromise( (resolve, reject) => {
+    datastore.delete(dsKey(kind, id), (err) => {
+        if (err) reject(err);
+        else resolve(id);
+    });
+});
+
 const runQuery = (query) => dsPromise( (resolve, reject) => {
     datastore.runQuery(query, (err, entities) => {
         if (err) reject(err);
@@ -57,4 +64,11 @@ module.exports = {
         key: dsKindKey('Order'),
         data: order
     }),
+    deleteOrder: (orderId) => dsDelete('Order',orderId),
+    getUserOrderInCart: (userId,cartId) => {
+        const query = datastore.createQuery('Order');
+        query.filter('userId', userId);
+        query.filter('cartId', cartId);
+        return runQuery(query);
+    }
 };

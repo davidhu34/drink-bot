@@ -12,5 +12,12 @@
     "start": "node server"
   },
   "author": "davidhu34",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "@google-cloud/datastore": "^4.2.0",
+    "@line/bot-sdk": "^6.8.2",
+    "koa": "^2.7.0",
+    "koa-bodyparser": "^4.2.1",
+    "koa-router": "^7.4.0"
+  }
 }
