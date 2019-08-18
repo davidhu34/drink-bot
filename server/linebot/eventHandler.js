@@ -66,23 +66,29 @@ const orderInfoReply = (msg, descList) => ({
     )
 });
 
+const getCurrentOrder = (userId) => users[userId].currentOrder || {};
+
 const confirmOrderReply = ({ userId }) => {
-    const { item } = users[userId].currentOrder;
+    const { item } = getCurrentOrder(userId);
     const { name, size, ice, sugar } = item;
-    users[userId].currentOrder = null;
-    return textMessage(`確認: ${name} ${size} ${ice} ${sugar}`);
+    return confirmMessage(
+        `確認: ${name} ${size} ${ice} ${sugar}`,
+        [true, false].map(affirmative => getConfirmOrderPostback(affirmative))
+    );
 };
+
 const fillOrder = (filling, { source, message }) => {
-    const { time, item } = users[source.userId].currentOrder;
+    const currentOrder = getCurrentOrder(source.userId);
+    const { item } = currentOrder;
     const order = {
-        time,
+        ...currentOrder,
         item: {
             ...item,
             [filling]: message.text
         }
     };
     users[source.userId].currentOrder = order;
-    return order
+    return order;
 };
 
 async function handleOrder (orderItem,event) {
@@ -107,13 +113,14 @@ async function handleOrder (orderItem,event) {
 async function handleMessageEvent(event) {
 
     const { source, message, replyToken } = event;
+    const userId = source.userId;
     console.log('message event:');
     console.log(source, message);
     
-    await getUserProfile(source.userId);
+    await getUserProfile(userId);
     console.log('users',users);
 
-    const { currentOrder } = users[source.userId];
+    const currentOrder = getCurrentOrder(userId)
     if (currentOrder) {
         const replyData = await handleOrder(currentOrder.item, event);
         return { replyToken, replyData };
@@ -178,11 +185,30 @@ const getOrderDrinkReply = ({ data, param, source }) => {
     const cart = ds.getCartById(cartId);
     if (cart) {
         users[source.userId].currentOrder = {
+            cartId,
             time: new Date(),
             item: newDrink()
         };
         return textMessage('請問要喝哪種飲料呢?');
     } else return textMessage('訂單已經過期');
+}
+
+const getConfirmOrderReply = async ({ data, param, source }) => {
+    const affirmative = data.flag == 1;
+    const userId = source.userId;
+    if (affirmative) {
+        const currentOrder = getCurrentOrder(userId);
+        const { cartId, time, item } = currentOrder;
+        const orderEntity = await ds.saveOrder({
+            cartId,
+            userId,
+            time,
+            ...item,
+        });
+        console.log(orderEntity);
+    }
+    users[userId].currentOrder = null;
+    return affirmative? textMessage('訂好了'): textMessage('取消了');
 }
 
 function getPostbackReply(postback) {
@@ -193,7 +219,9 @@ function getPostbackReply(postback) {
         case 'SHOP_MENU':
             return getShopMenuReply(postback);
         case 'ORDER_DRINK':
-            return getOrderDrinkReply(postback)
+            return getOrderDrinkReply(postback);
+        case 'CONFIRM_ORDER_DRINK':
+            return getConfirmOrderReply(postback)
         default:
             return textMessage(action);
     }
@@ -242,6 +270,17 @@ const getOrderDrinkPostback = (cartData, mine) => {
     return postbackAction(label, data, {
         displayText: label,
     })
+};
+
+const getConfirmOrderPostback = (affirmative) => {
+    const label = affirmative? '確定': '取消';
+    const data = qs.stringify({
+        action: 'CONFIRM_ORDER_DRINK',
+        flag: affirmative? 1: 2
+    });
+    return postbackAction(label, data, {
+        displayText: label,
+    });
 };
 
 const getCartDataById = async (cartId) => {
@@ -305,6 +344,14 @@ const cartCarousel = async (source,carts) => {
 
 const textMessage = (text) => ({
     type: 'text', text
+});
+
+const confirmMessage = (text, actions) => ({
+    type: 'template',
+    altText: text,
+    template: {
+        type: 'confirm', text, actions
+    }
 });
 
 const carouselCol = (text,actions,config) => ({

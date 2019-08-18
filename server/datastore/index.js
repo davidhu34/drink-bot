@@ -11,6 +11,7 @@ const dsPromise = (run) => new Promise(run).catch( err => console.log(err) );
 
 const dsQuery = (kind) => datastore.createQuery(kind);
 const dsKey = (kind, id) => datastore.key([kind, Number(id) || id]);
+const dsKindKey = (kind) => datastore.key(kind);
 
 const dsSave = (entity) => dsPromise( (resolve, reject) => {
     datastore.save(entity, (err) => {
@@ -51,5 +52,9 @@ module.exports = {
             'statusMessage',
         ],
         data: profile
+    }),
+    saveOrder: order => dsSave({
+        key: dsKindKey('Order'),
+        data: order
     }),
 };
