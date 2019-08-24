@@ -1,10 +1,10 @@
 const qs = require('querystring');
 const moment = require('moment');
 
-const ds = require('../datastore');
-const {
-    updateUserProfile
-} = require('./api');
+const utils = require('./utils');
+const { users, getUserProfile, getCurrentOrder } = require('./users');
+const { getPostbackReply } = require('./postbackReply');
+const pb = require('./postbacks');
 
 function handleEvent(event) {
     switch (event.type) {
@@ -17,10 +17,8 @@ function handleEvent(event) {
     }
 };
 
-let users = {};
-
 module.exports = (client) => async function (event) {
-console.log('users', users);
+    console.log('users', users);
     const result = await handleEvent(event);
     
     if (result) {
@@ -35,39 +33,21 @@ console.log('users', users);
     } else return Promise.resolve(null);
 }
 
-async function updateUser(userId) {
-    if (!users[userId]) {
-        users[userId] = await updateUserProfile(userId);
-    }
-}
-
-async function getUserProfile(userId) {
-    const profile = users[userId];
-    if (profile) {
-        return profile;
-    } else {
-        users[userId] = await updateUserProfile(userId);
-        return users[userId];
-    }
-};
-
 const sizeDescList = ['大','中','小'];
 const iceDescList = ['正常', '少冰', '半冰', '微冰', '去冰'];
 const sugarDescList = ['正常', '少糖', '半糖', '微糖', '無糖'];
 
 const orderInfoReply = (msg, descList) => ({
-    ...textMessage(msg),
-    quickReply: quickReply(
-        descList.map(desc => messageAction(desc))
+    ...utils.textMessage(msg),
+    quickReply: utils.quickReply(
+        descList.map(desc => utils.messageAction(desc))
     )
 });
-
-const getCurrentOrder = (userId) => users[userId].currentOrder || {};
 
 const confirmOrderReply = ({ userId }) => {
     const { item } = getCurrentOrder(userId);
     const { name, size, ice, sugar } = item;
-    return getConfirmationMessage(
+    return pb.getConfirmationMessage(
         `確認: ${name} ${size} ${ice} ${sugar}`,
         'SUBMIT_ORDER_DRINK'
     );
@@ -120,145 +100,8 @@ async function handleMessageEvent(event) {
     if (currentOrder) {
         const replyData = await handleOrder(currentOrder.item, event);
         return { replyToken, replyData };
-    } else return { replyToken, replyData: textMessage(message.text) };
-};
-
-
-let carts = [];
-
-const getRichMenuReply = async ({ data, params, source }) => {
-    const { index } = data;
-    const cartList = await ds.getCarts();
-    carts = cartList || [];
-
-    const cartFilter
-        = index == 0? a => a.userId === source.userId
-        : index == 1? a => a.userId !== source.userId
-        : a => a;
-
-    const viewCarts = carts.filter(cartFilter);
-    if (viewCarts.length) {
-        return cartCarousel(source, carts.filter(cartFilter));
-    } else {
-        return shopCarousel();
-    }
-};
-
-const getNewCartReply = async ({ data, params, source }) => {
-    const shopId = data.shopId;
-    const userId = source.userId;
-    console.log('time',params.datetime);
-    const cartEntity = await ds.saveCart({
-        shopId,
-        userId,
-        expiration: new Date(params.datetime)
-    });
-    return cartCarousel(source, [ds.entityToData(cartEntity)]);
-};
-
-const getShopMenuQuickReply = async ({ data, params, source }) => {
-    const { cartId } = data;
-
-    if (cartId) {
-        // from a cart
-        const cartData = await getCartDataById(cartId);
-        const orderAction = await getOrderOrRevokeAction(cartData,source.userId);
-        return quickReply([
-            orderAction
-        ]);
-    } else {
-        // from shop list
-        return quickReply([
-            messageAction('shop menu quick reply from list')
-        ]);
-    }
+    } else return { replyToken, replyData: utils.textMessage(message.text) };
 }
-
-const getShopMenuReply = async (postback) => {
-    const shop = await getShop(postback.data.shopId);
-    const quickReply = await getShopMenuQuickReply(postback);
-
-    return shop.menuUrls.map( (url,index) => {
-        const baseAction = imageAction(url);
-        return index === shop.menuUrls.length - 1? {
-            ...baseAction, quickReply
-        }: baseAction;
-    });
-};
-
-const newDrink = () => ({
-    name: '',
-    sugar: '',
-    ice: '',
-    size: ''
-});
-
-const getOrderDrinkReply = ({ data, params, source }) => {
-    const { cartId } = data;
-    const cart = ds.getCartById(cartId);
-    if (cart) {
-        users[source.userId].currentOrder = {
-            cartId,
-            time: new Date(),
-            item: newDrink()
-        };
-        return textMessage('請問要喝哪種飲料呢?');
-    } else return textMessage('訂單已經過期');
-}
-
-const getSubmitOrderReply = async ({ data, params, source }) => {
-    const affirmative = data.flag == 1;
-    const userId = source.userId;
-    if (affirmative) {
-        const currentOrder = getCurrentOrder(userId);
-        const { cartId, time, item } = currentOrder;
-        const orderEntity = await ds.saveOrder({
-            cartId,
-            userId,
-            time,
-            ...item,
-        });
-        console.log(orderEntity);
-    }
-    users[userId].currentOrder = null;
-    return affirmative? textMessage('訂好了'): textMessage('取消了');
-};
-
-const getConfirmRevokeReply = ({ data, params, source }) => {
-    return getConfirmationMessage(
-        `確定取消飲料?`,
-        'SUBMIT_REVOKE_ORDER',
-        { orderId: data.orderId }
-    );
-};
-
-const getSubmitRevokeReply = async ({ data, params, source }) => {
-    const orderId = data.orderId;
-    await ds.deleteOrder(orderId);
-    return textMessage('取消飲料了');
-}
-
-function getPostbackReply(postback) {
-    const { action } = postback.data;
-    switch (action) {
-        case 'RICH_MENU':
-            return getRichMenuReply(postback);
-        case 'NEW_CART':
-            return getNewCartReply(postback);
-        case 'SHOP_MENU':
-            return getShopMenuReply(postback);
-        case 'ORDER_DRINK':
-            return getOrderDrinkReply(postback);
-        case 'SUBMIT_ORDER_DRINK':
-            return getSubmitOrderReply(postback);
-        case 'CONFIRM_REVOKE_ORDER':
-            return getConfirmRevokeReply(postback);
-        case 'SUBMIT_REVOKE_ORDER':
-            return getSubmitRevokeReply(postback);
-        default:
-            return textMessage(action);
-    }
-};
 
 async function handlePostbackEvent(event) {
 
@@ -275,239 +118,3 @@ async function handlePostbackEvent(event) {
     const replyData = await getPostbackReply({ data, params, source });
     return { replyToken, replyData };
 }
-
-
-const getShop = (shopId) => ds.getShopById(shopId);
-
-const getShopMenuPostback = (shop,cartId) => {
-    const data = qs.stringify({
-        action: 'SHOP_MENU',
-        shopId: shop.shopId,
-        cartId: cartId
-    });
-
-    return postbackAction('看菜單', data, {
-        displayText: `看${shop.nameZH}(${shop.branch})菜單`
-    });
-};
-
-const getRevokeOrderPostback = (cartData,order) => {
-    const orderId = ds.getKey(order);
-    const { owner, shop } = cartData;
-    const mine = order.userId === cartData.userId;
-    const label = mine
-        ? `取消自己的${order.name}`
-        : `取消跟${owner.displayName}訂的${order.name}`;
-
-    const data = qs.stringify({
-        action: 'CONFIRM_REVOKE_ORDER', orderId
-    });
-    return postbackAction(label, data, {
-        displayText: label,
-    })
-};
-
-const getOrderDrinkPostback = (cartData, mine) => {
-    const { owner, cartId } = cartData;
-    const label = mine
-        ? '幫自己訂一杯'
-        : `跟著${owner.displayName}訂一杯`;
-
-    const data = qs.stringify({
-        action: 'ORDER_DRINK', cartId
-    });
-    return postbackAction(label, data, {
-        displayText: label,
-    })
-};
-
-const getConfirmationMessage = (msg, action, postbackData = {}) => confirmMessage(
-    msg,
-    [true, false].map(affirmative => {
-        const label = affirmative? '確定': '取消';
-        const data = qs.stringify({
-            action,
-            ...postbackData,
-            flag: affirmative? 1: 2
-        });
-        return postbackAction(label, data, {
-            displayText: label,
-        });
-    })
-);
-
-const getOrderOrRevokeAction = async (cartData, userId) => {
-    const userOrdersInCart = await ds.getUserOrderInCart(userId, cartData.cartId);
-    
-    if (userOrdersInCart.length) {
-        const userOrder = userOrdersInCart[0];
-        return getRevokeOrderPostback(cartData,userOrder);
-    } else {
-        const mine = cartData.userId === userId;
-        return getOrderDrinkPostback(cartData,mine);
-    }
-};
-
-const getCartDataById = async (cartId) => {
-    const cart = await ds.getCartById(cartId);
-    return getCartData(cart);
-};
-
-const getCartData = async (cart) => {
-    const cartId = ds.getKey(cart);
-    const [owner, shop] = await Promise.all([
-        getUserProfile(cart.userId),
-        getShop(cart.shopId)
-    ]);
-    
-    console.log('cart', cart, owner, shop);
-    return {
-        ...cart,
-        cartId,
-        owner,
-        shop
-    };
-};
-
-const cartCarouselCol = async (source,cart) => {
-    const cartData = await getCartData(cart);
-
-    const { owner, shop, cartId } = cartData;
-    const mine = owner.userId === source.userId;
-
-    const actions = [];
-    
-    // 看菜單
-    if (shop.menuUrls.length) {
-        actions.push(getShopMenuPostback(shop,cartId));
-    }
-    
-    // 跟單 || 抽單
-    const orderAction = await getOrderOrRevokeAction(cartData, source.userId);
-    actions.push(orderAction)
-
-    // 結單
-    if (mine) {
-        actions.push(messageAction('統計'));
-    }
-
-    const exp = cart.expiration;
-    const desc = `預計 ${exp.getMonth()+1}/${exp.getDate()} ${exp.getHours()}:${exp.getMinutes()} 結單`;
-
-    return carouselCol(desc, actions, {
-        title:`${shop.nameZH}(${owner.displayName})`,
-        thumbnailImageUrl: shop.logoUrl
-    });
-}
-
-const cartCarousel = async (source,carts) => {
-    console.log(carts);
-    const columns = await Promise.all(
-        carts.map(cart => cartCarouselCol(source,cart))
-    );
-    return carousel(columns, '目前訂單');
-}
-
-const getShopPostback = (shop) => {
-    const shopId = shop.shopId;
-    const label = `訂${shop.nameZH}`;
-    const data = qs.stringify({
-        action: 'NEW_CART',
-        shopId
-    });
-    return datetimePickerAction(label, data, {
-    });
-}
-
-const shopCarousel = async () => {
-    const shops = await ds.getShops();
-    console.log(shops);
-    return imageCarousel(
-        shops.map( shop => imageCarouselCol(shop.logoUrl, getShopPostback(shop)) ),
-        '訂哪家',
-    );
-};
-
-const textMessage = (text) => ({
-    type: 'text', text
-});
-
-const confirmMessage = (text, actions) => ({
-    type: 'template',
-    altText: text,
-    template: {
-        type: 'confirm', text, actions
-    }
-});
-
-const carouselCol = (text,actions,config) => ({
-    text, actions, ...config
-});
-
-const carousel = (columns, altText) => ({
-    type: 'template',
-    altText,
-    template: {
-        type: 'carousel',
-        columns
-    }
-});
-
-const imageCarouselCol = (imageUrl,action) => ({
-    imageUrl, action
-});
-
-const imageCarousel = (columns,altText) => ({
-    type: 'template',
-    altText,
-    template: {
-        type: 'image_carousel',
-        columns
-    }
-});
-
-const postbackAction = (label, data, config = {}) => ({
-    type: 'postback',
-    label,
-    data,
-    ...config
-});
-
-const datetimePickerAction = (label, data, config = {}) => ({
-    type: 'datetimepicker',
-    mode: 'datetime',
-    label,
-    data,
-    ...config
-});
-
-const quickReply = (actions) => ({
-    items: actions.map( action => baseAction(action) )
-});
-
-const baseAction = (action) => ({
-    type: 'action', action
-});
-
-const basePostbackAction = (label, data, config) => ({
-    type: 'action',
-    action: postbackAction(label, data, config)
-});
-
-const uriAction = (label,uri) => ({
-    type: 'uri',
-    label,
-    uri,
-});
-
-const messageAction = (label,text = '') => ({
-    type: 'message',
-    label,
-    text: text || label,
-});
-
-const imageAction = (url) => ({
-    type: 'image',
-    originalContentUrl: url,
-    previewImageUrl: url
-});
